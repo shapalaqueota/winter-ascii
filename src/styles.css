@@ -24,6 +24,113 @@ body,
   image-rendering: pixelated;
 }
 
+.hint {
+  position: absolute;
+  top: 14px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: #9a9a9a;
+  pointer-events: none;
+  transition: opacity 0.6s;
+  text-shadow: 0 0 6px #000, 0 0 2px #000;
+}
+
+.hud {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  letter-spacing: 0.06em;
+  color: #8a8a8a;
+  white-space: pre;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.82);
+  border: 1px solid #222;
+}
+
+.hud .fuel { color: #f0b050; }
+.hud .fuel.low { color: #e0603a; animation: blink 1s steps(2) infinite; }
+.hud .sticks { color: #c8a070; }
+.hud .hp { color: #d9d9d9; }
+.hud .hp.low { color: #e0603a; animation: blink 0.8s steps(2) infinite; }
+.hud .ammo { color: #e8d8a8; }
+
+.hurt {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 35%, rgba(170, 10, 0, 0.9) 100%);
+}
+.hud .time { color: #d0d0d0; }
+
+@keyframes blink { 50% { opacity: 0.35; } }
+
+.prompt,
+.message {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  pointer-events: none;
+  letter-spacing: 0.14em;
+  text-shadow: 0 0 8px #000, 0 0 2px #000;
+}
+
+.prompt:empty,
+.message:empty {
+  display: none;
+}
+
+.prompt,
+.message {
+  width: fit-content;
+  margin: 0 auto;
+  padding: 3px 12px;
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.prompt {
+  bottom: 52px;
+  font-size: 12px;
+  color: #ffd58a;
+}
+
+.message {
+  top: 58%;
+  font-size: 12px;
+  color: #d8c8a8;
+}
+
+.gameover {
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #bdbdbd;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  pointer-events: none;
+}
+
+.gameover pre {
+  margin: 0 0 6px;
+  font: inherit;
+  font-size: 26px;
+  letter-spacing: 0.3em;
+  color: #e07040;
+}
+
+.gameover .dim { color: #777; }
+
 .panel {
   position: absolute;
   left: 0;

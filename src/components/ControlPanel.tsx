@@ -59,16 +59,26 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
     <div className="help" onClick={onClose}>
       <pre>{`  NIGHT  —  controls
 
-  space    pause / resume
+  w a s d  walk          shift   run
+  space    jump          mouse   look (click first)
+  arrows   walk / turn   esc     release the mouse
+
+  click    shoot         r       reload
+
+  keep the fire alive: walk over sticks in the
+  forest to pick them up (max 5), then press
+  e        at the fire to feed it
+  zombies will not enter the firelight —
+  the stronger the fire, the wider the safe circle
+  r        relight after you lose
+
+  p        pause / resume
   f        fullscreen
-  m        mouse camera on / off
   1 / 2    snow   less / more
   3 / 4    wind   left / right
   5 / 6    speed  slower / faster
   7 / 8    glow   dimmer / brighter
-  h  ?     this help
-
-  move the mouse to look around`}</pre>
+  h  ?     this help`}</pre>
     </div>
   );
 }

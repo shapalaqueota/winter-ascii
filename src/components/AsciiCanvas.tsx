@@ -20,6 +20,8 @@ export function AsciiCanvas({ initialSettings, onEngine, onStats }: Props) {
     const engine = new WinterEngine(canvas, initial.current, (s) => statsCb.current(s));
     engine.start();
     onEngine(engine);
+    // dev-only handle for debugging from the console; stripped from production builds
+    if (import.meta.env.DEV) (window as unknown as { __engine?: WinterEngine }).__engine = engine;
     return () => {
       engine.destroy();
       onEngine(null);
