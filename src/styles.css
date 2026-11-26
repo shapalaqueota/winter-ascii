@@ -59,6 +59,10 @@ body,
 .hud .hp { color: #d9d9d9; }
 .hud .hp.low { color: #e0603a; animation: blink 0.8s steps(2) infinite; }
 .hud .ammo { color: #e8d8a8; }
+.hud .cycle { margin-bottom: 3px; letter-spacing: 0.12em; }
+.hud .cycle.night { color: #9fb0d0; }
+.hud .cycle.day { color: #f0e0b0; }
+.gameover pre.won { color: #f0d080; }
 
 .hurt {
   position: absolute;

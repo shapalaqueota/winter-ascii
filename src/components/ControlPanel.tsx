@@ -70,7 +70,12 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
   e        at the fire to feed it
   zombies will not enter the firelight —
   the stronger the fire, the wider the safe circle
-  r        relight after you lose
+  t        plant a torch (1 stick, lasts ~75 s)
+  r        play again after the game ends
+
+  survive 5 nights: at dawn the dead burn away and
+  you get a short, safe day to gather wood
+  radar (top right): @ fire  z zombie  = stick  ! torch
 
   p        pause / resume
   f        fullscreen

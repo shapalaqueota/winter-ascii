@@ -52,8 +52,18 @@ export interface GameState {
   reloading: boolean;
   kills: number;
   hurt: number;        // 0..1, red screen flash after being hit
-  overReason: 'fire' | 'killed' | '';
+  overReason: 'fire' | 'killed' | 'won' | '';
+  night: number;       // 1..nights
+  nights: number;
+  phase: Phase;
+  phaseLeft: number;   // seconds until the next phase
+  torches: number;
+  maxTorches: number;
 }
+
+export type Phase = 'night' | 'dawn' | 'day' | 'dusk';
+
+interface Torch { x: number; z: number; life: number }
 
 interface Zombie {
   x: number; z: number; hp: number; speed: number; seed: number;
@@ -104,6 +114,14 @@ const RELOAD_TIME = 1.5;
 const FIRE_DELAY = 0.24;         // seconds between shots
 const ZOMBIE_HIT = 18;           // damage per claw
 const ZOMBIE_H = 1.85;           // zombie height, world units
+const NIGHTS = 5;                // survive this many nights to win
+const NIGHT_LEN = 150;           // seconds
+const DAY_LEN = 45;
+const TWILIGHT = 10;             // dawn and dusk transitions
+const MAX_TORCHES = 4;
+const TORCH_LIFE = 75;
+const TORCH_SAFE = 3.4;          // zombies keep out of this radius around a lit torch
+const TORCH_H = 1.25;
 
 // first-person pistol, seen from behind; the muzzle is the top of the front sight
 const GUN = [
@@ -253,7 +271,15 @@ export class WinterEngine {
   private hitMark = 0;
   private hurt = 0;
   private kills = 0;
-  private overReason: 'fire' | 'killed' | '' = '';
+  private overReason: 'fire' | 'killed' | 'won' | '' = '';
+
+  // day / night cycle
+  private night = 1;
+  private phase: Phase = 'night';
+  private phaseT = 0;
+  private amb = 0;               // 0 = deep night, 1 = full (overcast) day
+  private fogLum = FOG_LUM;
+  private torches: Torch[] = [];
   private zombies: Zombie[] = [];
   private bits: Bit[] = [];      // blood and snow puffs from bullet hits
   private spawnIn = 9;
@@ -363,6 +389,7 @@ export class WinterEngine {
     }
     if (e.code.startsWith('Arrow')) e.preventDefault();
     if (e.code === 'KeyE' && !e.repeat) this.feedFire();
+    if (e.code === 'KeyT' && !e.repeat) this.plantTorch();
     if (e.code === 'KeyR' && !e.repeat) {
       if (this.over) this.restart();
       else this.reload();
@@ -438,6 +465,8 @@ export class WinterEngine {
           message: this.time - this.messageTime < 1.6 ? this.message : '',
           hp: this.hp, ammo: this.ammo, mag: MAG, reloading: this.reloadT > 0,
           kills: this.kills, hurt: this.hurt, overReason: this.overReason,
+          night: this.night, nights: NIGHTS, phase: this.phase, phaseLeft: this.phaseLeft(),
+          torches: this.torches.length, maxTorches: MAX_TORCHES,
         },
       });
     }
@@ -657,6 +686,12 @@ export class WinterEngine {
       const mz = z - this.camZ;
       L += (this.muzzle * 2.2) / (1 + (mx * mx + my * my + mz * mz) * 0.3);
     }
+    for (const t of this.torches) {
+      const tx = x - t.x;
+      const ty = y - TORCH_H;
+      const tz = z - t.z;
+      L += this.torchGlow(t) / (1 + (tx * tx + ty * ty + tz * tz) * 0.9);
+    }
     return L;
   }
 
@@ -670,6 +705,7 @@ export class WinterEngine {
   }
 
   private put(i: number, ch: number, lum: number, warm: number, depth: number, kind: number): void {
+    if (kind === GROUND || kind === TREE) lum += this.amb * 0.2;    // daylight lifts the scene
     this.chars[i] = ch;
     this.lum[i] = lum > 1 ? 1 : lum;
     this.warm[i] = warm > 1 ? 1 : warm;
@@ -710,10 +746,12 @@ export class WinterEngine {
     this.drawSticks();
     this.drawCampfire();
     this.drawFireParticles();
+    this.drawTorches();
     this.drawZombies();
     this.drawBits();
     this.drawSnow();
     this.drawGun();
+    this.drawRadar();
     this.blit();
   }
 
@@ -750,8 +788,13 @@ export class WinterEngine {
             const mz = gz - camZ;
             L += (this.muzzle * 2.2) / (1 + (mx * mx + mz * mz + camY * camY) * 0.3);
           }
+          for (const tc of this.torches) {
+            const tx = gx - tc.x;
+            const tz = gz - tc.z;
+            L += this.torchGlow(tc) / (1 + (tx * tx + tz * tz + TORCH_H * TORCH_H) * 0.9);
+          }
           const fog = 1 - Math.exp(-d / 50);
-          l = l * (1 - fog) + FOG_LUM * fog;
+          l = l * (1 - fog) + this.fogLum * fog;
           const add = L * 0.6 + h * 0.3;
           l += add;
           const warm = (add * 1.7) / (l + 0.02);
@@ -762,7 +805,13 @@ export class WinterEngine {
         } else {
           const elev = Yr / Math.sqrt(X * X + Yr * Yr + Z * Z);
           const l = 0.012 + 0.1 * Math.exp(-elev * 16) + h * 0.5;
-          this.put(i, this.rampChar(l, 0), l, (h * 0.5 * 1.7) / (l + 0.02), 1e9, SKY);
+          let ch = this.rampChar(l, 0);
+          if (this.amb > 0.02 && ch === R_RAMP[0]) {
+            // overcast day sky: a pale, grainy mist of dots
+            const hh = hash2(col * 7, row * 13);
+            if (hh < this.amb * 0.9) ch = hh < this.amb * 0.45 ? C.colon : C.dot;
+          }
+          this.put(i, ch, l + this.amb * (0.4 + 0.3 * (1 - elev)), (h * 0.5 * 1.7) / (l + 0.02), 1e9, SKY);
         }
       }
     }
@@ -788,7 +837,8 @@ export class WinterEngine {
       const tw = Math.sin(this.time * s.sp + s.ph);
       if (tw < -0.3) continue;
       const ch = tw > 0.85 ? C.star : tw > 0.3 ? C.plus : C.mid;
-      this.put(i, ch, 0.3 + 0.45 * tw, 0, 1e9, SKY);
+      if (this.amb > 0.45) continue;                           // stars fade at dawn
+      this.put(i, ch, (0.3 + 0.45 * tw) * (1 - this.amb), 0, 1e9, SKY);
     }
   }
 
@@ -823,7 +873,7 @@ export class WinterEngine {
           const i = row * cols + col;
           if (this.depth[i] <= depth) continue;
           const L = this.lightAt(tr.x, 0.5, tr.z);
-          const l = (0.1 + L * 0.4) * (1 - fog) + FOG_LUM * fog * 0.6;
+          const l = (0.1 + L * 0.4) * (1 - fog) + this.fogLum * fog * 0.6;
           this.put(i, tw > 1.5 && col !== c0 && col !== c1 ? C.H : C.pipe, l, (L * 1.2) / (l + 0.1), depth, TREE);
         }
         continue;
@@ -861,7 +911,7 @@ export class WinterEngine {
           l = 0.13 + 0.16 * n;
           ch = R_DARK[Math.min(R_DARK.length - 1, (n * R_DARK.length) | 0)];
         }
-        l = l * (1 - fog) + FOG_LUM * fog;
+        l = l * (1 - fog) + this.fogLum * fog;
         const add = L * (isSnow ? 0.9 : 0.5) + this.halo(col, row) * 0.3;
         l += add;
         if (far) ch = this.rampChar(l, 0);
@@ -1053,6 +1103,11 @@ export class WinterEngine {
     this.survived = 0;
     this.over = false;
     this.collected.clear();
+    this.night = 1;
+    this.phase = 'night';
+    this.phaseT = 0;
+    this.amb = 0;
+    this.torches = [];
     this.hp = HP_MAX;
     this.ammo = MAG;
     this.reloadT = 0;
@@ -1081,14 +1136,17 @@ export class WinterEngine {
     }
     if (dt === 0) return;                                  // paused
 
-    // spawn: more often, and more of them, the longer you last
-    if (!this.over) {
+    this.updateCycle(dt);
+    this.updateTorches(dt);
+
+    // spawn only at night; each night brings more, faster dead
+    if (!this.over && this.phase === 'night') {
       this.spawnIn -= dt;
       const alive = this.zombies.filter((z) => !z.dying).length;
-      const maxAlive = Math.min(14, 3 + Math.floor(this.survived / 30));
+      const maxAlive = 2 + 2 * this.night;
       if (this.spawnIn <= 0 && alive < maxAlive) {
         this.spawnZombie();
-        this.spawnIn = Math.max(2.5, 9 - this.survived * 0.04) * (0.7 + this.rnd() * 0.6);
+        this.spawnIn = Math.max(2, 8.5 - 1.3 * (this.night - 1)) * (0.7 + this.rnd() * 0.6);
       }
     }
 
@@ -1121,6 +1179,10 @@ export class WinterEngine {
           }
         }
         if (safeR > 0) [nx, nz] = pushOut(nx, nz, FIRE_X, FIRE_Z, safeR);
+        for (const tc of this.torches) {
+          const k = this.torchStrength(tc);
+          if (k > 0.1) [nx, nz] = pushOut(nx, nz, tc.x, tc.z, TORCH_SAFE * k);
+        }
         z.x = nx;
         z.z = nz;
       }
@@ -1165,6 +1227,179 @@ export class WinterEngine {
     this.bits = this.bits.filter((b) => b.life > 0);
   }
 
+  // ---------------------------------------------------------- night & day
+  private phaseLeft(): number {
+    const len = this.phase === 'night' ? NIGHT_LEN : this.phase === 'day' ? DAY_LEN : TWILIGHT;
+    return Math.max(0, len - this.phaseT);
+  }
+
+  private updateCycle(dt: number): void {
+    if (this.over) return;
+    this.phaseT += dt;
+    if (this.phase === 'night') {
+      this.amb = 0;
+      if (this.phaseT >= NIGHT_LEN) {
+        if (this.night >= NIGHTS) {
+          this.over = true;
+          this.overReason = 'won';
+          for (const z of this.zombies) z.dying = true;
+          return;
+        }
+        this.phase = 'dawn';
+        this.phaseT = 0;
+        for (const z of this.zombies) {
+          if (!z.dying) { z.dying = true; z.hitFlash = 1; }
+        }
+        this.say(`dawn — night ${this.night} survived. the dead burn away`);
+      }
+    } else if (this.phase === 'dawn') {
+      this.amb = Math.min(1, this.phaseT / TWILIGHT);
+      if (this.phaseT >= TWILIGHT) { this.phase = 'day'; this.phaseT = 0; }
+    } else if (this.phase === 'day') {
+      this.amb = 1;
+      if (this.phaseT >= DAY_LEN) {
+        this.phase = 'dusk';
+        this.phaseT = 0;
+        this.say('the sun is going down');
+      }
+    } else {
+      this.amb = Math.max(0, 1 - this.phaseT / TWILIGHT);
+      if (this.phaseT >= TWILIGHT) {
+        this.phase = 'night';
+        this.phaseT = 0;
+        this.night++;
+        this.spawnIn = 6;
+        this.say(`night ${this.night} of ${NIGHTS}`);
+      }
+    }
+    this.fogLum = FOG_LUM + this.amb * 0.22;              // misty, brighter distance by day
+  }
+
+  // ------------------------------------------------------------- torches
+  private torchStrength(t: Torch): number {
+    return Math.max(0, Math.min(1, t.life / 12));          // fades over its last 12 s
+  }
+
+  private torchGlow(t: Torch): number {
+    return this.torchStrength(t) * 0.95 * (0.85 + 0.15 * Math.sin(this.time * 9 + t.x * 3));
+  }
+
+  private plantTorch(): void {
+    if (this.over) return;
+    if (this.carried < 1) { this.say('you need a stick to make a torch'); return; }
+    if (this.torches.length >= MAX_TORCHES) { this.say(`you can only keep ${MAX_TORCHES} torches lit`); return; }
+    const x = this.posX + this.sinY * 1.2;
+    const z = this.posZ + this.cosY * 1.2;
+    if (Math.hypot(x - FIRE_X, z - FIRE_Z) < 1.6) { this.say('too close to the fire'); return; }
+    this.carried--;
+    this.torches.push({ x, z, life: TORCH_LIFE });
+    this.say('torch planted');
+  }
+
+  private updateTorches(dt: number): void {
+    for (const t of this.torches) t.life -= dt;
+    const before = this.torches.length;
+    this.torches = this.torches.filter((t) => t.life > 0);
+    if (this.torches.length < before) this.say('a torch burned out');
+  }
+
+  private drawTorches(): void {
+    const { cols, rows } = this;
+    const tick = Math.floor(this.time * 10);
+    for (const t of this.torches) {
+      const k = this.torchStrength(t);
+      // the pole
+      for (let s = 0; s <= 12; s++) {
+        const y = (s / 12) * (TORCH_H - 0.05);
+        if (!this.project(t.x, y, t.z)) continue;
+        const col = Math.floor(this.cx + (this.px / this.pz) * this.fCols);
+        const row = Math.floor(this.cy - (this.py / this.pz) * this.fRows);
+        if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
+        const i = row * cols + col;
+        if (this.depth[i] <= this.pz) continue;
+        this.put(i, C.pipe, 0.28 + 0.3 * k, 0.75, this.pz, TREE);
+      }
+      // the flame: a small teardrop
+      if (!this.project(t.x, TORCH_H, t.z)) continue;
+      const depth = this.pz;
+      const sR = this.fRows / depth;
+      const sC = this.fCols / depth;
+      const bc = this.cx + this.px * sC;
+      const br = this.cy - this.py * sR;
+      const fh = Math.max(1, Math.round(0.38 * sR * (0.5 + 0.5 * k)));
+      const fw = Math.max(0, Math.round(0.09 * sC * (0.5 + 0.5 * k)));
+      for (let r = 0; r < fh; r++) {
+        const row = Math.floor(br) - r;
+        if (row < 0 || row >= rows) continue;
+        const up = r / fh;
+        const w = Math.round(fw * (1 - up) * (0.8 + 0.4 * hash2(r, tick)));
+        for (let c = -w; c <= w; c++) {
+          const col = Math.floor(bc) + c;
+          if (col < 0 || col >= cols) continue;
+          const i = row * cols + col;
+          if (this.depth[i] <= depth) continue;
+          let v = (1 - up) * (1 - Math.abs(c) / (w + 1)) * (0.6 + 0.4 * k);
+          v += (hash2(col * 3 + tick, row) - 0.5) * 0.15;
+          if (v < 0.05) continue;
+          const ch = R_FLAME[Math.min(R_FLAME.length - 1, (v * R_FLAME.length) | 0)];
+          this.put(i, ch, 0.3 + 0.7 * v, v > 0.85 ? 0.35 : 1, depth - 0.01, FIRE);
+        }
+      }
+    }
+  }
+
+  // --------------------------------------------------------------- radar
+  /** Heading-up radar in the top-right corner: fire, sticks, zombies, torches. */
+  private drawRadar(): void {
+    const { cols, rows } = this;
+    const rr = Math.max(5, Math.round(rows * 0.11));        // radius in rows
+    const rc = rr * (this.cellH / this.cellW) * 0.5 * 2;    // same radius in columns (cells are tall)
+    const c0 = cols - Math.ceil(rc) - 3;
+    const r0 = rr + 2;
+    const RANGE = 34;
+    const sinY = this.sinY;
+    const cosY = this.cosY;
+    // clear a round window and draw the rim
+    for (let row = r0 - rr - 1; row <= r0 + rr + 1; row++) {
+      for (let col = Math.floor(c0 - rc - 2); col <= Math.ceil(c0 + rc + 2); col++) {
+        if (row < 0 || row >= rows || col < 0 || col >= cols) continue;
+        const e = ((col - c0) / rc) ** 2 + ((row - r0) / rr) ** 2;
+        if (e > 1.12) continue;
+        const i = row * cols + col;
+        if (e > 0.9) this.overlay(i, C.dot, 0.42, 0);
+        else this.overlay(i, 0, 0, 0);
+      }
+    }
+    const plot = (x: number, z: number, ch: number, lum: number, warm: number, clampToRim: boolean): void => {
+      const dx = x - this.posX;
+      const dz = z - this.posZ;
+      let f = (dx * sinY + dz * cosY) / RANGE;             // ahead
+      let s = (dx * cosY - dz * sinY) / RANGE;             // to the right
+      const d = Math.hypot(f, s);
+      if (d > 0.86) {
+        if (!clampToRim) return;
+        f = (f / d) * 0.86;
+        s = (s / d) * 0.86;
+      }
+      const col = Math.round(c0 + s * rc);
+      const row = Math.round(r0 - f * rr);
+      if (row >= 0 && row < rows && col >= 0 && col < cols) this.overlay(row * cols + col, ch, lum, warm);
+    };
+    for (const st of this.sticks) plot(st.x, st.z, C.eq, 0.62, 0.62, false);
+    for (const t of this.torches) plot(t.x, t.z, ci('!'), 0.85, 1, false);
+    for (const z of this.zombies) if (!z.dying) plot(z.x, z.z, ci('z'), 0.5, 1, false);
+    plot(FIRE_X, FIRE_Z, C.at, 0.95, 1, true);              // always shown, on the rim if far
+    this.overlay(r0 * cols + Math.round(c0), ci('^'), 0.95, 0);
+    if (r0 - rr - 1 >= 0) {
+      // a north marker on the rim
+      const nf = Math.cos(-this.yaw);
+      const ns = Math.sin(-this.yaw);
+      const col = Math.round(c0 + ns * rc * 1.0);
+      const row = Math.round(r0 - nf * rr * 1.0);
+      if (row >= 0 && row < rows && col >= 0 && col < cols) this.overlay(row * cols + col, ci('N'), 0.7, 0);
+    }
+  }
+
   private spawnZombie(): void {
     const r = this.rnd;
     for (let tries = 0; tries < 8; tries++) {
@@ -1176,7 +1411,7 @@ export class WinterEngine {
       const tr = this.treeCached(Math.floor(x / CELL), Math.floor(z / CELL));
       if (tr && Math.hypot(x - tr.x, z - tr.z) < tr.r * 0.35 + 0.5) continue;
       this.zombies.push({
-        x, z, hp: 3, speed: 1.05 + r() * 0.55 + Math.min(0.6, this.survived / 400),
+        x, z, hp: 3, speed: 1.0 + r() * 0.5 + 0.12 * (this.night - 1),
         seed: r() * 100, phase: r() * 6, cd: 0, hitFlash: 0, dying: false, deathT: 0,
       });
       return;
@@ -1309,7 +1544,7 @@ export class WinterEngine {
             ch = n > 0.5 ? C.pipe : C.H; l = 0.22 + 0.1 * n;
           }
           l += L * 0.55;
-          l = l * (1 - fog) + FOG_LUM * fog;
+          l = l * (1 - fog) + this.fogLum * fog;
           if (z.hitFlash > 0 && part !== 5) { l += z.hitFlash * 0.5; w = 0.2; }
           this.put(i, ch, l, w, depth, TREE);
         }

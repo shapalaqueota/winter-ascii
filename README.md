@@ -20,7 +20,12 @@ shrink and the dark closes in. Go out into the forest, walk over sticks to pick
 them up (you can carry 5), bring them back and press `e` at the fire to feed it.
 If it goes out, the night wins: press `r` to relight it and try to last longer.
 
-The dead come out of the forest, more of them the longer you last. They will not
+Survive 5 nights. Each night lasts two and a half minutes; at dawn the dead burn
+away and you get a short, safe day to gather wood before the next, harder night.
+Plant torches (`t`, one stick each) to make small safe spots out in the dark, and
+use the radar in the top right to find the fire, sticks and zombies.
+
+The dead come out of the forest, more of them every night. They will not
 step into the firelight, so a strong fire keeps a wide safe circle around you,
 but the sticks are out in the dark. Shoot them: three body shots or one to the head.
 
@@ -36,6 +41,7 @@ Click the scene to capture the mouse and look around; `esc` releases it.
 | click     | shoot                  |
 | `r`       | reload / relight       |
 | `e`       | feed the fire          |
+| `t`       | plant a torch          |
 | arrows    | walk / turn            |
 | `p`       | pause / resume         |
 | `f`       | fullscreen             |

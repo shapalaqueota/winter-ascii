@@ -21,7 +21,7 @@ export const TREE_DARK = '.:;!|i';
 export const TREE_SNOW = '+*AH#M%@';
 /** Flame layers, cool tips -> white-hot core. */
 export const FLAME = "'`.:;^/\\(){}*x%&#@";
-const EXTRA = 'oO0=_~-HAM·°✦❄*+.';
+const EXTRA = 'oO0=_~-HAMN!z^·°✦❄*+.';
 
 const unique = new Set<string>([' ', ...RAMP, ...SNOW_RAMP, ...TREE_DARK, ...TREE_SNOW, ...FLAME, ...EXTRA]);
 export const CHARS: string[] = [...unique];
